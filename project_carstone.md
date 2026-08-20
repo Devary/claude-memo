@@ -1,6 +1,6 @@
 ---
 name: project-carstone
-description: "carstone monorepo (github.com/Devary/carstone): autoscout24-style car marketplace dogfooding the whole crudstone family (context-gen, dynamic-crud, search-crudstone, sidebar-crudstone) — 2 Quarkus backends + no-auth gateway + 2 Angular apps, all built and live-verified in one session (2026-08-19/20)"
+description: "carstone monorepo (github.com/Devary/crudstone-demo-carstone): autoscout24-style car marketplace dogfooding the whole crudstone family (context-gen, dynamic-crud, search-crudstone, sidebar-crudstone) — 2 Quarkus backends + no-auth gateway + 2 Angular apps, all built and live-verified across two sessions (2026-08-19/20)"
 metadata:
   node_type: memory
   type: project
@@ -9,11 +9,14 @@ metadata:
 
 # carstone — car marketplace dogfooding the crudstone family (built 2026-08-19/20)
 
-Built end-to-end in one very long session, from a one-line user request ("build a car buy/sell
-site using our components, improve them if they're missing something"). See [[project_gen_crudstone]]/
+Built end-to-end from a one-line user request ("build a car buy/sell site using our components,
+improve them if they're missing something"). See [[project_gen_crudstone]]/
 [[project_search_crudstone]]/[[project_sidebar_crudstone]] for the underlying libraries this
-dogfoods. Repo: `github.com/Devary/carstone` (public), monorepo, Maven reactor + 2 sibling Angular
-CLI apps (not part of the reactor).
+dogfoods. Repo: **`github.com/Devary/crudstone-demo-carstone`** (public — renamed from the
+original `github.com/Devary/carstone`, full history preserved; the old repo still exists
+untouched at `github.com/Devary/carstone` as a spare, not deleted). Monorepo, Maven reactor + 2
+sibling Angular CLI apps (not part of the reactor). Local git remote `origin` points at the
+`crudstone-demo-carstone` repo; `carstone-old` remote still points at the original if ever needed.
 
 ## Architecture
 ```
@@ -128,12 +131,61 @@ every rerun performed; this only showed up in throwaway isolation specs used to 
 screenshot question (a Cypress full-page-screenshot stitching artifact on the sticky results
 sidebar, itself not confirmed to be a real bug either way).
 
+## Session 2 (2026-08-20): search bar trim + numeric bounds + PrimeNG range slider
+
+User feedback: the search bar had too many always-visible fields (10) to read any placeholder,
+year accepted any integer from 0, price had no realistic bounds, and price specifically should
+render as a PrimeNG range slider instead of two plain inputs.
+
+- **CarListing external fields trimmed 10 → 4 concepts** (Brand/Model/Price range/Year range,
+  6 controls, one clean 12-col row) — title/fuelType/sellerType/city moved into the "Filters"
+  dropdown.
+- **New context-gen feature: `CrudstoneField#minValue/#maxValue/#range`** (pushed `5c8d260`).
+  minValue/maxValue (double, 0=unset, same sentinel convention as the image constraints) bound a
+  "number" field's widget AND are enforced server-side (`EntityValidator.validateNumber`, new
+  `NUMBER_TOO_SMALL`/`NUMBER_TOO_LARGE`/`NUMBER_INVALID_VALUE` codes) — not just a UI hint.
+  `range=true` marks a numeric field as the TARGET of a `rangeTarget` pair that should render as
+  ONE PrimeNG slider. **Declared ONCE on the real target field** (e.g. `price`), not duplicated
+  on the virtual from/to fields — `AnnotationSearchContextLoader.resolveRangeBounds` runs as a
+  post-processing pass (after the full field map is built, so it's declaration-order-independent)
+  copying the target's own minValue/maxValue/range onto both halves of the pair.
+- **search-crudstone frontend** (pushed `bfd0432`, then `5045cf8`): `isRangeSliderFrom`/
+  `isRangeSliderTo` helpers — the "from" half renders one `p-slider [range]="true"` (one-way
+  `[ngModel]`, commits both bounds together on `(onSlideEnd)`, NOT `(onChange)` — PrimeNG's own
+  keyboard-driven `updateValue()` only emits `onChange`, never `onSlideEnd`, so keyboard
+  interaction can't drive this control, only mouse; `Slider.onBarClick` DOES emit `onSlideEnd`
+  directly, confirmed by reading `primeng-slider.mjs`, and is what Cypress tests drive via a
+  track click). The "to" half renders nothing of its own and is filtered out of
+  `externalFields()`/`dropdownFields()` entirely.
+- **Real bug found + fixed: Electron renderer CRASH**, not a normal test failure — reproduced
+  consistently (~84s then hard crash) across a plain memory-pressure retry too. Root cause:
+  `[ngModel]="rangeSliderValueOf(field)"` called the method directly in the template, returning a
+  **fresh array literal every change-detection cycle** even when values hadn't moved — handing
+  PrimeNG's Slider `ControlValueAccessor` a new object reference each tick, which under load
+  spiraled into a crash rather than a graceful failure. Fixed with a small `Map`-based cache
+  keyed by field name returning the SAME array instance until the from/to values actually change.
+  **General lesson**: never bind a template `[input]` directly to a method that constructs a new
+  array/object literal per call — memoize it.
+- Applied to `CarListing`: `year`/`yearFrom`/`yearTo` get `minValue=1950, maxValue=2030` (plain
+  bounded inputs, no slider — a specific year is more naturally typed than dragged).
+  `price`/`priceFrom`/`priceTo` get `minValue=500, maxValue=500_000` + `range=true` on `price`
+  (renders as the slider). `priceFrom`'s own `style` widened `col-md-2` → `col-md-4` since it's
+  now the pair's only rendered control.
+- Both Cypress suites re-verified live and green after all of the above (admin-ui 3/3,
+  front-ui 4/4, including the slider genuinely narrowing results via `filter.priceMin`).
+
 **Why:** User explicitly asked to dogfood the crudstone family end-to-end AND improve the
-libraries where they're lacking — this was the vehicle for finding the range-filter gap and 6
-other real bugs across every layer (context-gen, both backends, the gateway, both frontends),
-none of which would have surfaced from build/compile success alone.
+libraries where they're lacking — this was the vehicle for finding the range-filter gap and
+several other real bugs across every layer (context-gen, both backends, the gateway, both
+frontends, and — session 2 — a genuine Electron crash root-caused to an Angular template
+anti-pattern), none of which would have surfaced from build/compile success alone.
 **How to apply:** When resuming this project, check `docker ps` for `carstone-postgres` first
-(start it if stopped), then boot admin → front → gateway → the two Angular dev servers, in that
-order. When touching context-gen/search-crudstone/dynamic-crud/sidebar-crudstone on behalf of
-carstone, remember the tarball-repack step or the Angular apps will silently keep using stale
-lib code.
+(start it if stopped — confirmed it survives across sessions, `Up 23 hours` seen at the start of
+session 2), then boot admin → front → gateway → the two Angular dev servers, in that order. When
+touching context-gen/search-crudstone/dynamic-crud/sidebar-crudstone on behalf of carstone,
+**always rebuild + repack + reinstall the tarball AND restart the consuming Angular dev server**
+— this bit session 2 directly (spent real time chasing a "missing slider" that was actually just
+a stale tarball) despite already being documented here; `ng build <lib>` alone updates
+`dist/<lib>/`, not the tarball, and even after `npm pack` the consuming app's `node_modules` needs
+an explicit reinstall (`rm -rf node_modules/<lib> && npm install <lib>@file:...`) plus a dev-server
+restart (a running `ng serve` won't pick up a swapped dependency on its own).
