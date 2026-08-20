@@ -238,3 +238,36 @@ an invalid from/to combo into the plain-input year pair).
   with `git branch --set-upstream-to=origin/main main`. **How to apply**: after any repo
   rename/remote-juggling in this project, run `git branch -vv` to confirm `main` tracks `origin`
   before trusting a bare `git push`.
+
+## Session 3 (2026-08-21): CrudstoneField#noFutureValue
+
+User: *"max year cannot be in the future (add a flag in the annotation NoFutureValue = true)"*.
+New generic flag, not year/car-specific in the code itself: a "number" field marked
+`noFutureValue=true` rejects a value later than the current year, checked fresh via `Year.now()`
+at validation time (never a fixed value baked into the annotation).
+
+- **context-gen** (pushed `38bdfb6`): `CrudstoneField#noFutureValue`, propagated through `Field`,
+  `AnnotationContextLoader`, and — resolved onto both halves of a search `rangeTarget` pair the
+  same way `minValue`/`maxValue`/`range` already are — `SearchField` + `AnnotationSearchContextLoader
+  .resolveRangeBounds`. Server-side enforcement in `EntityValidator` (new `NUMBER_FUTURE_VALUE`
+  code) applies regardless of which widget rendered the field, so it's a real boundary, not just a
+  UI hint. Added `EntityValidatorTest` (previously zero coverage for that class).
+- **search-crudstone** (pushed `4153d5d`): `TableField#noFutureValue` (inherited by `SearchField`)
+  + a `cappedMaxValue(field)` helper folding `min(maxValue, currentYear)` into every place
+  `maxValue` was already used as an absolute upper bound (`rangeInputMaxFor`'s two branches, the
+  price slider's own `[max]` binding) — independent of maxValue, not a replacement for it.
+- **carstone**: applied to `CarListing.year` (pushed `ca66a12`, both `origin`/crudstone-demo-carstone
+  and `carstone-old`). Deliberately left `maxValue=2030` as-is rather than trimming it — the
+  effective cap (`min(maxValue, currentYear)`) makes `noFutureValue` the thing that actually
+  enforces the real constraint every year, proving the two combine rather than one replacing the
+  other.
+- **Live-verified end to end**, not just compiled: `curl -X PUT .../carListings/1` with `year:2030`
+  → `400 "year must not be later than 2026"`; same request with `year:2026` → `200`. New Cypress
+  test (`smoke.cy.ts`, 7/7 passing) confirms `yearFrom`/`yearTo`'s own `[max]` HTML attribute reads
+  the current year in the browser too.
+- **Restart friction hit again**: after reinstalling context-gen to `~/.m2` and repacking the
+  search-crudstone tarball, `pkill -f "carstone-admin.*quarkus:dev"` (matching the outer Maven
+  wrapper process) left the actual forked JVM child bound to the port — port-in-use errors on
+  restart despite the pkill "succeeding". **How to apply**: after any pkill-by-pattern for a
+  Quarkus dev-mode process, verify with `lsof -i:<port>` and kill that PID directly too before
+  relaunching — don't assume the wrapper's pattern also matches its child.
