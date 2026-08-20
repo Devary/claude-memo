@@ -189,3 +189,52 @@ a stale tarball) despite already being documented here; `ng build <lib>` alone u
 `dist/<lib>/`, not the tarball, and even after `npm pack` the consuming app's `node_modules` needs
 an explicit reinstall (`rm -rf node_modules/<lib> && npm install <lib>@file:...`) plus a dev-server
 restart (a running `ng serve` won't pick up a swapped dependency on its own).
+
+## Session 2 continued: slider "blocked" + year min>max fixes, and a standing genericity directive
+
+Two more live bug reports on the same range-filter UI: **"the range is not moving, it's like
+blocked"** (dragging the price slider) and **"year min cannot be greater than year max"** (typing
+an invalid from/to combo into the plain-input year pair).
+
+- **Slider blocked, root cause**: `rangeSliderValueOf` read straight from `filterValues()`, which
+  only updates on `onSlideEnd` — so every CD tick during an active drag re-pushed the stale
+  pre-drag value back into the slider, fighting the user's own mousemove. Fixed in
+  `entity-search.component.ts` with `rangeSliderStaged` (a `Map<string,[number,number]>` holding
+  the slider's own live drag position, written via a manually-wired `(ngModelChange)`, since the
+  read side is a method call and can't use `[(ngModel)]` banana-box syntax) — cleared once the drag
+  commits so external changes (Reset, a restored filter snapshot) still take effect afterward.
+- **That redesign briefly reintroduced the EARLIER Electron renderer crash** (see session 2's
+  "Real bug found + fixed" entry above) — the un-staged branch went back to returning a fresh
+  `[from, to]` array literal every call. Live-verifying via Cypress hung the Electron renderer at
+  100% CPU for 10+ minutes with zero screenshots produced (worse than the original ~84s crash).
+  Fixed by restoring a second cache, `rangeSliderCommitted`, giving a stable array reference across
+  CD ticks whenever the underlying value hasn't actually changed. **Lesson reinforced**: any redesign
+  touching a `[ngModel]`-bound getter must re-verify the array/object identity is still stable, not
+  just that the new feature works — the two concerns are independent and one fix can silently drop
+  the other.
+- **Year min>max, generic fix**: `rangeInputMinFor(field)`/`rangeInputMaxFor(field)` bind each half
+  of ANY plain-input `rangeTarget` pair's own `<input min>/<max>` to its sibling's current value
+  (`rangeSiblingOf`), so an invalid combo can't be typed in the first place — not year-specific.
+  `clearDependentsViolatedBy` got a second pass (numeric rangeTarget pairs, mirroring the existing
+  Date/`dependsOn` pass) as defense in depth for paths other than direct typing.
+- **Standing directive from the user** (2026-08-20): *"remember always that everything must be
+  generic, for the min must be less than max you need to mention it in an annotation."* Applies
+  going forward to all context-gen/search-crudstone/dynamic-crud/sidebar-crudstone work, not just
+  this fix. Acted on immediately: added `AnnotationContextLoader.validateMinMax()` to **context-gen**
+  (pushed `0175eaf`) — fails fast at load time for ANY `@CrudstoneField(type="number")` with both
+  `minValue`/`maxValue` set and `minValue > maxValue`, regardless of whether the field is also used
+  in a search `rangeTarget` pair. `CrudstoneField.minValue()`'s javadoc documents the invariant
+  directly on the annotation (not just in a commit message or memory).
+- Live-verified via a rebuilt Cypress suite (6 specs, `carstone-front-ui/cypress/e2e/smoke.cy.ts`)
+  passing in 9s with normal CPU. A literal raw mousedown→mousemove→mouseup drag simulation proved
+  too fiddly to get reliable through Cypress/Electron's synthetic-event pipeline (PrimeNG's
+  `onMouseDown`/document-level `mousemove` listener chain never engaged despite matching the
+  library's own source) and was dropped in favor of two consecutive `onBarClick`-style interactions
+  proving the handle keeps advancing rather than snapping back — same code path, reliable test.
+- Pushed to **search-crudstone** `b741b9f` and **carstone** `5d99c23`.
+- **Gotcha caught while pushing**: the carstone monorepo's local `main` branch was tracking
+  `carstone-old` (the untouched spare `github.com/Devary/carstone` repo) as its upstream, not
+  `origin` (`crudstone-demo-carstone`) — a bare `git push` silently went to the spare repo. Fixed
+  with `git branch --set-upstream-to=origin/main main`. **How to apply**: after any repo
+  rename/remote-juggling in this project, run `git branch -vv` to confirm `main` tracks `origin`
+  before trusting a bare `git push`.
