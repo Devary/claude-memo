@@ -271,3 +271,39 @@ at validation time (never a fixed value baked into the annotation).
   restart despite the pkill "succeeding". **How to apply**: after any pkill-by-pattern for a
   Quarkus dev-mode process, verify with `lsof -i:<port>` and kill that PID directly too before
   relaunching — don't assume the wrapper's pattern also matches its child.
+
+## Session 3 continued: "i still can put 2033 in the max year" — the [min]/[max] attribute was cosmetic
+
+Important **general lesson, applies beyond this project**: a native `<input type="number">`'s
+`min`/`max` HTML attribute is NOT enforcement — it only disables the spinner arrows past that
+point and marks the field `:invalid` via the constraint-validation API. A typed keystroke, paste,
+or autofill is accepted regardless, unless something explicitly checks/clamps the value. The
+entire earlier "year min cannot be greater than year max" fix (session 2, `b741b9f`) and the
+`noFutureValue` fix above ONLY ever set this attribute — never actually clamped anything — so both
+were silently unenforced for direct typing the whole time, only the Cypress tests never caught it
+because those tests also only asserted the (cosmetic) attribute value, not the actual resulting
+input value. **How to apply going forward**: whenever a min/max-like constraint needs real
+enforcement in an Angular template-driven form, verify with a test that types past the bound and
+asserts the STORED/rendered value, not the HTML attribute.
+
+Fixed (search-crudstone `c9c3dc4`, carstone `699f061`) with `clampNumberFilter`, wired to
+`(blur)` — deliberately NOT `(ngModelChange)`: clamping on every keystroke corrupts multi-digit
+entry, since typing "2022" passes through incomplete intermediate values (2, 20, 202) that would
+get force-corrected against `minValue` mid-keystroke — the exact same class of
+one-way-binding-fights-live-interaction bug already diagnosed for the price slider's drag (see
+`rangeSliderStaged`/`rangeSliderCommitted` above), just triggered by keystrokes instead of a drag.
+
+**A second, subtler bug found while fixing this**: `clearDependentsViolatedBy`'s numeric
+`rangeTarget` pass (added in the original session-2 fix, "defense in depth" comment) reacted to
+one half being typed past its sibling by **deleting the sibling's own filter value**, not the
+violating field. That directly fought the new clamp: typing yearFrom=2018 past yearTo=2015 deleted
+yearTo mid-keystroke, so by the time blur fired, `clampNumberFilter`'s sibling lookup found nothing
+and fell back to the unbounded absolute max — silently doing nothing. Removed that pass entirely;
+clamping (not deleting) is the correct behavior, and PrimeNG's own range Slider already
+self-enforces the slider case internally without any pruning needed.
+
+**Why this matters for future annotation-driven constraints**: a numeric/date bound expressed as a
+declarative annotation (`minValue`/`maxValue`/`noFutureValue`/a `rangeTarget` pair) needs BOTH a
+live UI hint (the HTML attribute, for browser-native spinner behavior and `:invalid` styling) AND
+a real value-clamping handler wired to the actual user-interaction event — the attribute alone is
+not sufficient, no matter how "generic" or well-annotated the backend metadata is.
