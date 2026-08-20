@@ -333,3 +333,56 @@ Worked around by keeping all test year picks inside the default-visible decade r
 that interaction — 7/7 passing. **How to apply**: if a future test genuinely needs to cross a
 decade boundary, budget extra time to debug the prev/next button interaction rather than assuming
 a simple `.click({force:true})` will work.
+
+**Root cause found retroactively in session 4** (see below): that prev-button mystery was almost
+certainly the exact same bug as the Contact form submit button — see [[feedback_primeng_button_click_target]].
+
+## Session 4 (2026-08-21): dark glassmorphism theme, About/Contact pages, parametrized footer
+
+User: *"add a stylish background for the cars website, add other pages like contact us etc, add a
+parametrized footer (create a new component like sidebar and searchbar...) make the website darken
+blurry style"*, followed by *"the website styles must be in the override css system that we have
+already created"*.
+
+- **Scoping decision**: built the footer as a well-structured, config-driven standalone component
+  living IN carstone-front-ui (`src/app/footer/`), not as a brand-new published sibling library
+  (unlike sidebar-crudstone/search-crudstone themselves) — a full new repo+tarball-consumption cycle
+  was judged disproportionate to a styling/UX request, given how much friction that pattern already
+  costs each time a lib changes (see the repeated "always repack+reinstall+restart" lesson above).
+  Structured so it COULD be extracted later: no carstone-specific coupling, fully `[config]`-input-
+  driven (`FooterConfig`: brand/tagline/columns/socialLinks/copyright).
+- **"Override css system"**: confirmed via research this means the `themeVars()`/`THEME_PALETTES`
+  pattern already duplicated across dynamic-crud/search-crudstone/sidebar-crudstone (see
+  [[project_gen_crudstone]]/[[project_search_crudstone]]/[[project_sidebar_crudstone]]) — PrimeNG
+  CSS-custom-property overrides, never hardcoded colors, scoped per-component via `[style]`. Reused
+  directly by importing `themeVars` from `searchcrudstone` (already a carstone-front-ui dependency)
+  rather than reimplementing it a 4th time. Applied at the `AppComponent` root itself
+  (`host: {'[style]': 'themeStyle()'}`, `themeVars('blue')` — the same theme `CarListing`'s own
+  `@Searchable` already declares) so the whole site, including the two new static pages, reads
+  consistently rather than only the search/results pages being blue.
+- Dark mode flipped to **default ON** (`localStorage.getItem('darkMode') !== 'false'`, was `===
+  'true'`) — the dark/blurry look is the site's actual default now, not an opt-in toggle state.
+  Global background: a fixed multi-radial-gradient under `html.app-dark`, colors via
+  `--p-primary-*`/`--p-surface-*` tokens. Glass surfaces (`sf-footer`, `.glass-card`) use
+  `backdrop-filter: blur()` against that background for the actual glassmorphism effect.
+- **Two real bugs found fixing the Contact form**, both diagnosed by literally dumping the live
+  post-click DOM to a file and reading it (`cy.writeFile`) rather than guessing:
+  1. `[(ngModel)]="name"` where `name = signal('')` (readonly) — banana-in-a-box desugars to
+     `[ngModel]="name" (ngModelChange)="name=$event"`, which needs an ASSIGNABLE plain property;
+     assigning to a signal reference like that doesn't set it, it's a no-op/type mismatch. Switched
+     to plain mutable fields for the three ngModel-bound values (this codebase otherwise leans
+     heavily on signals — worth remembering ngModel specifically doesn't support them directly).
+  2. `<p-button type="submit">` inside a `(ngSubmit)`-bound `<form>` triggered a native form
+     submission that reloaded the page before the success state ever rendered, DESPITE Angular's
+     `(ngSubmit)` normally calling `preventDefault()` internally. Fixed by dropping the native
+     submit path entirely — `type="button"` + `(onClick)="submit()"` only.
+
+**Why:** user wants a polished, presentable public-facing demo, not just a functionally-correct one
+— matches the original brief ("build a car marketplace... improve components if they're missing
+something") extended to visual/UX completeness.
+**How to apply:** the footer + About/Contact pages establish `.glass-card`/`.page-backdrop` as the
+house style for any FUTURE static page in this app — reuse those global classes rather than
+inventing new ones. If a genuine "footer-crudstone" library is ever wanted (backend-`@Footer`-
+annotation-driven like `@Sidebar`, not just `[config]`-input-driven), that's a clean, scoped
+follow-up — the current component's structure doesn't need to change to support that later, only
+where its config comes from.
