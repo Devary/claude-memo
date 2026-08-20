@@ -307,3 +307,29 @@ declarative annotation (`minValue`/`maxValue`/`noFutureValue`/a `rangeTarget` pa
 live UI hint (the HTML attribute, for browser-native spinner behavior and `:invalid` styling) AND
 a real value-clamping handler wired to the actual user-interaction event — the attribute alone is
 not sufficient, no matter how "generic" or well-annotated the backend metadata is.
+
+## Session 3 continued: CrudstoneField#yearPicker
+
+User: *"change the min and max year with a date picker for a year only"*. New generic flag
+(context-gen `9a3de04`), same declare-once-on-the-real-target-field-resolve-onto-both-halves
+pattern as `range`/`noFutureValue`: `yearPicker=true` renders a "number" field's search filter as
+a PrimeNG `p-datepicker` with `view="year"` (a year-grid, no month/day drill-down) instead of a
+plain `<input type="number">`. Value is still stored/validated as a plain integer — Date<->number
+conversion happens only at the search-crudstone UI boundary (`yearPickerValueOf`/`setYearFilter`).
+
+This elegantly closes the "cosmetic attribute" gap documented just above: with `readonlyInput=true`
+set, there's no typing path at all anymore, and PrimeNG's own `minDate`/`maxDate` (wrapping
+`rangeInputMinFor`/`rangeInputMaxFor`'s existing bound logic) disable out-of-range years directly
+in the picker's grid — real enforcement with no separate clamp handler needed, unlike the
+plain-input case `clampNumberFilter` still covers for any OTHER number field.
+
+Applied to `CarListing.year` (search-crudstone `56aee6a`, carstone `c39bc79`, both remotes).
+Cypress suite rewritten for the new widget (typing no longer works) — opens the picker via its
+`.p-datepicker-dropdown` icon, clicks a `.p-datepicker-year` cell. **Gotcha**: the year-grid opens
+centered on the CURRENT decade (e.g. 2020-2029 in 2026) — clicking `.p-datepicker-prev-button` to
+navigate to an earlier decade did not visibly work when driven through Cypress (root cause not
+fully chased down; possibly a PrimeNG `p-button`-wrapped click-target/animation-timing quirk).
+Worked around by keeping all test year picks inside the default-visible decade rather than fighting
+that interaction — 7/7 passing. **How to apply**: if a future test genuinely needs to cross a
+decade boundary, budget extra time to debug the prev/next button interaction rather than assuming
+a simple `.click({force:true})` will work.
