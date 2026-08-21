@@ -386,3 +386,46 @@ inventing new ones. If a genuine "footer-crudstone" library is ever wanted (back
 annotation-driven like `@Sidebar`, not just `[config]`-input-driven), that's a clean, scoped
 follow-up — the current component's structure doesn't need to change to support that later, only
 where its config comes from.
+
+## Session 5 (2026-08-21): full landing page + glass search-result styling
+
+User: *"i want a full landing page + styles in the search result components"*.
+
+- **Landing page** (`/`, replacing the old straight-to-`/carListings` redirect): hero + CTA, live
+  stats, a "Browse by body type" grid using CarListing's real `BodyType` enum values, a
+  "Selling your car?" CTA band. `/carListings` is now the direct search entry point (linked from
+  the hero CTA, header, footer).
+- **Category pre-filtering, a real feature not just decoration**: each body-type chip navigates to
+  `/carListings` with Angular Router `state: {filterValues: {bodyType: '...'}}` —
+  `EntitySearchPageComponent` (search-crudstone) already reads `history.state.filterValues` into
+  its `initialFilters` input for its own "Back to search" link, so this reuses that EXISTING
+  mechanism rather than inventing a new one. Lands with the filter set but does NOT auto-search
+  (that component hardcodes `autoSearchOnInit=false`) — user still confirms with their own click.
+- **New sticky site header** (logo/nav/dark-toggle). Learned mid-session: went with `position:
+  fixed` first, discovered it would overlap search-crudstone's own `.results-page` (only `2rem`
+  top margin, no override token for that specific clearance) — rather than patching every page's
+  top padding individually (fragile, has to be redone for every future page), switched to
+  `position: sticky`, which reserves its own space in NORMAL document flow so every current AND
+  future routed page gets correct clearance automatically with zero page-specific styling needed.
+  **General lesson**: prefer `sticky` over `fixed` for a header/nav specifically when the pages
+  under it are NOT all owned by you (here: the search results page comes from a third-party-ish
+  library with its own margin choices) — `fixed` pushes the clearance problem onto every page
+  individually; `sticky` solves it once, structurally.
+- **Glass search bar/result cards**: extended search-crudstone's OWN pre-existing `--sc-*`
+  override-token system (search-crudstone `08d4183`) — added `--sc-card-blur`,
+  `--sc-result-card-bg` (previously untokenized, a plain `var(--p-content-background)`), and
+  `--sc-result-card-blur`. Set from carstone-front-ui's global stylesheet under `html.app-dark`
+  only, zero library source touched — exactly the extension mechanism that library's own README
+  "Styling" section already documents ("a host app overrides any subset from its own global
+  stylesheet — no rebuilding this library needed"). Confirms [[project_search_crudstone]]'s
+  `--sc-*` system (not just `theme-palettes.ts`) is ALSO part of "the override css system" this
+  user has referred to twice now.
+- Cypress suite extended to 12/12 passing (landing hero+CTA, category pre-fill verifying BOTH the
+  filter got set AND that no search request fired yet, header nav round-trip).
+
+**Why:** completes the "polished, presentable demo" arc from session 4 — a real homepage instead
+of a bare redirect, and the result cards visually matching the rest of the now-glass site instead
+of standing out as plain opaque boxes.
+**How to apply:** any FUTURE search-crudstone visual property that's currently untokenized (found
+one already, `--sc-result-card-bg`) should get a `--sc-*` token added when touched, not hardcoded —
+keeps the override system genuinely complete rather than accumulating gaps found ad hoc.
