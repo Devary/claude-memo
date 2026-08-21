@@ -429,3 +429,54 @@ of standing out as plain opaque boxes.
 **How to apply:** any FUTURE search-crudstone visual property that's currently untokenized (found
 one already, `--sc-result-card-bg`) should get a `--sc-*` token added when touched, not hardcoded —
 keeps the override system genuinely complete rather than accumulating gaps found ad hoc.
+
+## Session 6 (2026-08-21): footer pinned to viewport bottom + year-field flex-collapse bug
+
+User: *"footer must be at the bottom of the page not relative to the searchbar, the years addition
+is not good and proper"*.
+
+- **Footer**: `app.component`'s `:host` is now a full-viewport-height flex column (header /
+  `.site-main` / `sf-footer`), `.site-main` set to `flex: 1 0 auto` to absorb leftover space on a
+  short-content page. Verified with BOTH a short (660px) and deliberately tall (1200px) viewport —
+  `footer.getBoundingClientRect().bottom` exactly equals `window.innerHeight` at 1200px, proving
+  it's genuinely pinned, not coincidentally positioned. **Lesson**: a quick visual read of a single
+  short-viewport screenshot can be misleading for this class of bug — the fix LOOKED unchanged at
+  660px purely because there wasn't much room to grow into; always cross-check with a deliberately
+  taller viewport before concluding a sticky-footer fix didn't work.
+- **Years, real root cause found — NOT year-specific**: `p-select`/`p-multiselect`/`p-datepicker`'s
+  own HOST TAG (as opposed to the `.p-select`/`.p-multiselect`/`.p-datepicker` CSS class PrimeNG's
+  base styles apply to an INNER wrapper span) has no width of its own; as a flex item of
+  `.entity-search-segment` with no `flex-grow`/`flex-basis`, it shrinks to fit content, and that
+  content wants `width:100%` of that SAME shrunk box — a circular collapse down to roughly icon-
+  width alone. Confirmed by literally dumping `getComputedStyle()` (not guessing): the inner span's
+  `width:100%` was resolving correctly, just against an outer host that never actually grew.
+  `flex: 1 1 auto` on the host TAGS (search-crudstone `89953c2`) breaks the circularity — affects
+  ALL THREE control types, not just the date picker (brand/model were ALSO visibly cramped, "Mode"
+  instead of "Model", before this fix — the same bug, just less noticed since dropdowns don't add
+  an icon competing for the same tiny space the way the year picker's calendar icon does).
+- **Second, independent contributor**: even after the flex fix, the ROW's total content (5 field
+  segments + Filters/Reset filters/Search buttons) still didn't fit the card's 900px min-width
+  floor — buttons alone ate nearly half the card's width at everyday desktop sizes. Tokenized as
+  `--sc-card-min-width` (search-crudstone, default 900px unchanged for other consumers), raised to
+  `1100px` here. Also widened `yearFrom`/`yearTo` col-md-2→3, `priceFrom` col-md-4→3 (a slider's
+  label reads compactly regardless of track width, so it needed the room less).
+- **Debugging approach that actually worked** (after two wrong guesses — first assumed the CSS
+  fix wasn't reinstalled, second assumed a hardcoded `outerWidth` threshold was simply too strict):
+  `cy.writeFile()` dumping `getComputedStyle()`/`getBoundingClientRect()` values to a JSON file
+  and reading it directly — this is what surfaced the ACTUAL flex circularity, not visual
+  inspection or guessing at PrimeNG internals. Also **discovered an input's own rendered
+  `outerWidth` doesn't reliably indicate whether its placeholder text is visually legible** —
+  overflowing placeholder text isn't necessarily clipped at the input's box edge (a 79px-wide
+  input showed a fully-readable, un-truncated "Year From" placeholder in the actual screenshot) —
+  the final regression test asserts the placeholder ATTRIBUTE text instead of a width threshold,
+  since that's what's reliably assertable; the visual-legibility claim itself was confirmed by
+  eye, once, via screenshot, not re-asserted mechanically every run.
+- Cypress suite: 14/14 passing.
+
+**Why:** the search bar's cramped/collapsed fields trace back to a genuinely generic library bug
+(the flex-item circularity), not something carstone-specific — worth remembering for ANY future
+search-crudstone entity with several external fields, not just this one.
+**How to apply:** if a future entity's search bar STILL looks cramped even after this fix, check
+`--sc-card-min-width` first (raise it) before assuming another flex/CSS bug — the two contributing
+causes found this session (flex collapse + insufficient card width) are independent and both need
+to be addressed for a many-external-field entity to render comfortably.
